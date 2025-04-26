@@ -1,0 +1,13 @@
+
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: 2em;
+  padding: var(--quiz-padding, 1.5em);
+}
+
+@media (max-width: 600px) {
+  :host {
+    --quiz-padding: 0.75em;
+  }
+}

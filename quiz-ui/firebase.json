@@ -1,0 +1,12 @@
+{
+  "hosting": {
+    "public": "dist/quiz-ui/browser",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}
