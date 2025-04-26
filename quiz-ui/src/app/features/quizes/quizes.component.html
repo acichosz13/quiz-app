@@ -1,0 +1,15 @@
+<div>
+  <h2>Voice Quiz</h2>
+  <button mat-button (click)="startQuiz()">Start Quiz</button>
+  @if (currentQuestion) {
+    <div>
+      <p><strong>Question:</strong> {{ currentQuestion.question }}</p>
+      @if (userAnswer) {
+        <p>You said: {{ userAnswer }}</p>
+      }
+      @if (feedback) {
+        <p>Feedback: {{ feedback }}</p>
+      }  
+    </div>
+  }
+</div>
