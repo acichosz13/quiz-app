@@ -1,10 +1,9 @@
 import { CommonModule } from '@angular/common';
-import { Component, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, inject } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { Firestore, collection, collectionData } from '@angular/fire/firestore';
-import { Observable } from 'rxjs';
 import { MatCardModule } from '@angular/material/card';
-
+import { MetricComponent } from '../../shared/metric/metric.component'
 interface QuizQuestion {
   question: string;
   answer: string;
@@ -17,6 +16,7 @@ interface QuizQuestion {
     CommonModule,
     MatButtonModule,
     MatCardModule,
+    MetricComponent
   ],
   templateUrl: './quizes.component.html',
   styleUrl: './quizes.component.scss'
@@ -34,16 +34,19 @@ export class QuizesComponent {
   public listening = false;
   public isQuizActive = false;
   public quizCompleted = false;
-
+  public score: number | undefined
+  public metrics: any[] = []
   // Quiz results
   public correctAnswers: number = 0;
   public incorrectAnswers: number = 0;
 
   private retryCount = 0;
-  private maxRetries = 2;
+  private maxRetries = 10;
   private currentIndex = 0;
+  private recognition: any;
 
   private firestore = inject(Firestore);
+  private cdr = inject(ChangeDetectorRef);
   
   public ngOnInit(): void {
     const questionsRef = collection(this.firestore, 'quiz-questions');
@@ -62,6 +65,23 @@ export class QuizesComponent {
     this.askQuestion();
   }
 
+  public cancelQuiz() {
+    if (this.recognition) {
+      this.recognition.abort();
+      this.recognition = null;
+    }
+  
+    speechSynthesis.cancel();
+  
+    this.isQuizActive = false;
+    this.quizCompleted = false;
+    this.currentQuestion = undefined as any;
+    this.userAnswer = '';
+    this.feedback = '';
+    this.listening = false;
+    this.resetQuizResults();
+  }
+
 
   private askQuestion() {
     this.currentQuestion = this.questions[this.currentIndex];
@@ -74,7 +94,6 @@ export class QuizesComponent {
   
     speechSynthesis.speak(utterance);
   }
-  
 
   private speak(text: string): Promise<void> {
     return new Promise((resolve) => {
@@ -83,10 +102,10 @@ export class QuizesComponent {
       speechSynthesis.speak(utterance);
     });
   }
-  
 
   private listen() {
-    const recognition = new (window as any).webkitSpeechRecognition();
+    this.recognition = new (window as any).webkitSpeechRecognition();
+    const recognition = this.recognition;
     recognition.lang = 'en-US';
     recognition.interimResults = false;
     recognition.maxAlternatives = 1;
@@ -118,12 +137,14 @@ export class QuizesComponent {
     };
 
     recognition.onerror = (event: any) => {
-      this.listening = false;
-      this.handleEmptySpeech();
+      console.log('on error', event)
     };
 
     recognition.onend = () => {
       this.listening = false;
+      if (this.isQuizActive && !this.userAnswer) {
+        setTimeout(() => this.listen(), 500); // small delay to prevent infinite loops
+      }
     };
 
     recognition.start();
@@ -134,26 +155,49 @@ export class QuizesComponent {
       this.retryCount++;
       this.feedback = "I didn't catch that. Let's try again.";
       await this.speak(this.feedback);
-      setTimeout(() => this.listen(), 2000);
+      setTimeout(() => this.listen(), 500);
     } else {
       this.retryCount = 0;
       this.feedback = `Let's move on. The correct answer was: ${this.currentQuestion.answer}`;
       await this.speak(this.feedback);
-      setTimeout(() => this.nextQuestion(), 3000);
+      setTimeout(() => this.nextQuestion(), 2000);
     }
   }
 
 
   private async nextQuestion() {
+    console.log('next question')
     this.currentIndex++;
     if (this.currentIndex < this.questions.length) {
       this.askQuestion();
     } else {
       this.isQuizActive = false;
       this.quizCompleted = true;
-      await this.speak('Quiz complete!');
+      this.score = this.calculateScore();
+      this.metrics = this.calculateMetrics();
+      this.cdr.detectChanges();
+      await this.speak('Quiz completed! Your score is ' + this.score + ' percent.');
+      if (this.recognition) {
+        this.recognition.abort();
+        this.recognition = null;
+      }
       this.currentQuestion = undefined as any;
     }
+  }
+
+  private calculateScore(): number {
+    const totalQuestions = this.correctAnswers + this.incorrectAnswers;
+    if (totalQuestions === 0) return 0;
+    return Math.round((this.correctAnswers / totalQuestions) * 100);
+  }
+
+  private calculateMetrics(): any[] {
+    const totalAnswer = this.correctAnswers + this.incorrectAnswers
+    return [
+      { label: 'Total', value: totalAnswer },
+      { label: 'Correct', value: this.correctAnswers },
+      { color: 'var(--mat-sys-on-error-container', label: 'Wrong', value: this.incorrectAnswers}
+    ]
   }
 
   private resetQuizResults() {

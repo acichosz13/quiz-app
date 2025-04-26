@@ -1,0 +1,27 @@
+:host {
+  --metric-color-default: var(--mat-sys-primary);
+  display: flex;
+  justify-content: space-around;
+}
+.mat-mdc-card-outlined {
+  padding: 0;
+  width: fit-content;
+  min-width: 94px;
+}
+
+.metric-value {
+  display: flex;
+  justify-content: center;
+  color: var(--metric-color, var(--mat-sys-primary));
+  font: var(--mat-sys-headline-medium);
+}
+
+.metric-label {
+  display: flex;
+  justify-content: center;
+  font: var(--mat-sys-label-large);
+}
+
+.metric-content {
+  padding: 0.5em;
+}
