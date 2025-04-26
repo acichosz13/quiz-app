@@ -3,7 +3,9 @@ import { ChangeDetectorRef, Component, inject } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { Firestore, collection, collectionData } from '@angular/fire/firestore';
 import { MatCardModule } from '@angular/material/card';
-import { MetricComponent } from '../../shared/metric/metric.component'
+import { MetricComponent } from '../../shared/metric/metric.component';
+import * as levenshtein from 'fast-levenshtein';
+
 interface QuizQuestion {
   question: string;
   answer: string;
@@ -34,7 +36,7 @@ export class QuizesComponent {
   public listening = false;
   public isQuizActive = false;
   public quizCompleted = false;
-  public score: number | undefined
+  public score: number = 0;
   public metrics: any[] = []
   // Quiz results
   public correctAnswers: number = 0;
@@ -47,13 +49,30 @@ export class QuizesComponent {
 
   private firestore = inject(Firestore);
   private cdr = inject(ChangeDetectorRef);
-  
+  private numberMap: { [key: number]: string } = {
+    0: 'zero',
+    1: 'one',
+    2: 'two',
+    3: 'three',
+    4: 'four',
+    5: 'five',
+    6: 'six',
+    7: 'seven',
+    8: 'eight',
+    9: 'nine'
+  };
+
+
   public ngOnInit(): void {
-    const questionsRef = collection(this.firestore, 'quiz-questions');
+    const questionsRef = collection(this.firestore, 'quiz-questions')
     collectionData(questionsRef, { idField: 'id' })
       .subscribe(data => {
-        console.log('Quiz questions:', data);
-        this._questions = data as QuizQuestion[];
+        // TODO fix database structure
+        this._questions = (data as QuizQuestion[]).sort((a, b) => {
+          const aId = (a as any).id.replace('question', '');
+          const bId = (b as any).id.replace('question', '');
+          return aId - bId;
+        });
       });
   }
 
@@ -89,7 +108,7 @@ export class QuizesComponent {
     this.feedback = '';
   
     const utterance = new SpeechSynthesisUtterance(this.currentQuestion.question);
-  
+    utterance.rate = 0.5;
     utterance.onend = () => this.listen();
   
     speechSynthesis.speak(utterance);
@@ -123,15 +142,25 @@ export class QuizesComponent {
       }
 
       this.retryCount = 0;
-      this.userAnswer = transcript.toLowerCase();
-      const correct = this.userAnswer.includes(this.currentQuestion.answer.toLowerCase());
-      this.feedback = correct ? 'Correct!' : `Incorrect. The answer was: ${this.currentQuestion.answer}`;
-      if (correct) this.correctAnswers++;
-      else {
+
+      this.userAnswer = this.convertDigitsToWords(transcript.toLowerCase());
+      const correctAnswer = this.currentQuestion.answer.toLowerCase().replace(/[:,().']/g, ''); // remove punctuation
+      
+      // Get the similarity percentage between the user answer and the correct answer
+      const similarityPercent = this.similarity(this.userAnswer, correctAnswer) * 100;
+      console.log('similarityPercent', similarityPercent)
+      console.log('userAnswer', this.userAnswer, correctAnswer)
+      if (similarityPercent >= 95) {
+        const additionalFeedback = similarityPercent < 100 ?  ` slightly difference based on what I heard. Answer: ${this.currentQuestion.answer}` : '';
+        this.feedback = 'Correct! ' + additionalFeedback;
+        this.correctAnswers++;
+      } else {
+        this.feedback = `Incorrect. The correct answer was: ${this.currentQuestion.answer}`;
         this.incorrectAnswers++;
         this.incorrectQuestions.push(this.currentQuestion);
       }
-
+    
+      // Proceed to the next question
       await this.speak(this.feedback);
       setTimeout(() => this.nextQuestion(), 3000);
     };
@@ -148,6 +177,15 @@ export class QuizesComponent {
     };
 
     recognition.start();
+  }
+
+
+  
+  private convertDigitsToWords(text: string): string {
+    return text.split('').map(char => {
+      const num = parseInt(char);
+      return !isNaN(num) ? this.numberMap[num] : char;  // Convert digits to words
+    }).join('');
   }
 
   private async handleEmptySpeech() {
@@ -205,4 +243,13 @@ export class QuizesComponent {
     this.incorrectAnswers = 0;
     this.incorrectQuestions = [];
   }
+
+
+  private similarity(userAnswer: string, correctAnswer: string): number {
+    const distance = levenshtein.get(userAnswer, correctAnswer);
+    const maxLength = Math.max(userAnswer.length, correctAnswer.length);
+    return 1 - distance / maxLength; // returns a percentage of similarity
+  }
+ 
+  
 }

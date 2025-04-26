@@ -34,7 +34,7 @@
     <mat-card-content>
       <app-metric class="metric-results" [metrics]="metrics"></app-metric>
     </mat-card-content>
-    @if (score && score < 100) {
+    @if (score < 100) {
       <mat-card-actions>
         <button mat-button (click)="startQuiz('retake')">Practice</button>
       </mat-card-actions>
