@@ -164,11 +164,10 @@ export class QuizesComponent {
 
     this.retryCount = 0;
     this.userAnswer = this.convertDigitsToWords(finalTranscript);
-    const correctAnswer = this.currentQuestion.answer.toLowerCase().replace(/[:,().']/g, '');
+    const similarityPercent = this.checkAnswer(this.currentQuestion.answer);
 
-    const similarityPercent = this.similarity(this.userAnswer, correctAnswer) * 100;
     if (similarityPercent >= SIMILARITY_THRESHOLD * 100) {
-      const extra = similarityPercent < 100 ? ` Slightly different. Correct: ${this.currentQuestion.answer}` : '';
+      const extra = similarityPercent < 100 ? ` Slightly different. Answer: ${this.currentQuestion.answer}` : '';
       this.feedback = 'Correct!' + extra;
       this.correctAnswers++;
     } else {
@@ -176,7 +175,7 @@ export class QuizesComponent {
       this.incorrectAnswers++;
       this.incorrectQuestions.push(this.currentQuestion);
     }
-
+    this.cdr.detectChanges();
     await this.speak(this.feedback);
     setTimeout(() => this.nextQuestion(), 2000);
   }
@@ -254,6 +253,19 @@ export class QuizesComponent {
       return trimmed;
     }).join(' ');
   }
+
+  private checkAnswer(answer: string): number {
+    const removedPunc = answer.toLowerCase().replace(/[:,().']/g, '');
+
+    const removedPuncSim = this.similarity(this.userAnswer, removedPunc) * 100;
+    if (removedPuncSim === 100) return removedPuncSim;
+
+    const removedSlash = removedPunc.replace(/[/]/g, '').replace('  ', ' ');
+    const removedSlashSim = this.similarity(this.userAnswer, removedSlash) * 100;
+    if (removedSlashSim === 100) return removedSlashSim;
+
+    return Math.max(removedPuncSim, removedSlashSim);
+  } 
 
   private convertDigitsToWords(text: string): string {
     return text.split('').map(char => {
