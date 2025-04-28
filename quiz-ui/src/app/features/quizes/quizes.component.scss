@@ -34,3 +34,8 @@
     margin-top: 0.25em;
   }
 }
+
+mat-radio-group {
+  display: flex;
+  flex-direction: column;
+}

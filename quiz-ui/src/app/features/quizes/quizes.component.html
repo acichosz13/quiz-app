@@ -11,7 +11,14 @@
 
     @if (!isQuizActive) {
       <p>Answer the question by speaking.</p>
-      <p>Quiz settings: ...coming soon</p>
+      <form [formGroup]="quizForm">
+        <h3>Quiz Settings</h3>
+        <label>Question order:</label>
+        <mat-radio-group aria-label="Question Order" formControlName="questionOrder">
+          <mat-radio-button checked="true" value="asc">Ascending</mat-radio-button>
+          <mat-radio-button value="random">Random</mat-radio-button>
+        </mat-radio-group>
+      </form>
     }
     @if (isQuizActive && currentQuestion){
       <div class="question-container">

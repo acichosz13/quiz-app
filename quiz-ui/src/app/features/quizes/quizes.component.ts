@@ -2,13 +2,17 @@ import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, inject } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
+import { MatRadioModule } from '@angular/material/radio';
 import { collection, collectionData, Firestore } from '@angular/fire/firestore';
 import { MetricComponent, Metric } from '../../shared/metric/metric.component';
 import * as levenshtein from 'fast-levenshtein';
+import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
 
 interface QuizQuestion {
   question: string;
   answer: string;
+  id: string;
+  sort?: number;
 }
 
 declare var webkitSpeechRecognition: any;
@@ -24,8 +28,10 @@ const MAX_RETRIES = 10;
   standalone: true,
   imports: [
     CommonModule,
+    ReactiveFormsModule,
     MatButtonModule,
     MatCardModule,
+    MatRadioModule,
     MetricComponent
   ],
   templateUrl: './quizes.component.html',
@@ -46,6 +52,8 @@ export class QuizesComponent {
   public correctAnswers = 0;
   public incorrectAnswers = 0;
 
+  public quizForm: any;
+
   // Private state
   private _questions: QuizQuestion[] = [];
   private retryCount = 0;
@@ -55,6 +63,7 @@ export class QuizesComponent {
   private partialTranscript = '';
   private firestore = inject(Firestore);
   private cdr = inject(ChangeDetectorRef);
+  private fb = inject(FormBuilder);
 
   private numberMap: { [key: number]: string } = {
     0: 'zero', 1: 'one', 2: 'two', 3: 'three', 4: 'four',
@@ -72,10 +81,14 @@ export class QuizesComponent {
           return aId - bId;
         });
       });
+    this.buildForm();
   }
 
   public startQuiz(type: 'full' | 'retake' = 'full'): void {
+    const order = this.quizForm.get('questionOrder').value;
     this.questions = type === 'retake' ? [...this.incorrectQuestions] : [...this._questions];
+    this.questions = order === 'asc' ? this.ascendingOrder(this.questions) : this.randomOrder(this.questions);
+
     this.currentIndex = 0;
     this.resetQuizResults();
     this.isQuizActive = true;
@@ -272,5 +285,25 @@ export class QuizesComponent {
       const num = parseInt(char);
       return !isNaN(num) ? this.numberMap[num] : char;
     }).join('');
+  }
+
+  private buildForm(): void {
+    this.quizForm = this.fb.group({
+      questionOrder: ['asc'],
+    })
+  }
+
+  private ascendingOrder(questions: QuizQuestion[]): QuizQuestion[] {
+    return questions.sort((a, b) => {
+      const aId = (a as any).id.replace('question', '');
+      const bId = (b as any).id.replace('question', '');
+      return aId - bId;
+    });
+  }
+
+  private randomOrder(questions: QuizQuestion[]): QuizQuestion[] {
+    return questions
+      .map((question) => ({ ...question, sort: Math.random() }))
+      .sort((a, b) => a.sort - b.sort)
   }
 }
