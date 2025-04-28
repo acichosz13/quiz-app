@@ -117,7 +117,6 @@ export class QuizesComponent {
   }
 
   private startListening(): void {
-    this.partialTranscript = '';
     const SpeechRecognition = (window as any).webkitSpeechRecognition;
     this.recognition = new SpeechRecognition();
     const recognition = this.recognition;
@@ -203,6 +202,7 @@ export class QuizesComponent {
 
   private async nextQuestion(): Promise<void> {
     this.currentIndex++;
+    this.partialTranscript = '';
     if (this.currentIndex < this.questions.length) this.askQuestion();
     else this.completeQuiz();
   }
