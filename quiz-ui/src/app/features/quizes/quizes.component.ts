@@ -1,15 +1,23 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, inject } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
-import { Firestore, collection, collectionData } from '@angular/fire/firestore';
 import { MatCardModule } from '@angular/material/card';
-import { MetricComponent } from '../../shared/metric/metric.component';
+import { collection, collectionData, Firestore } from '@angular/fire/firestore';
+import { MetricComponent, Metric } from '../../shared/metric/metric.component';
 import * as levenshtein from 'fast-levenshtein';
 
 interface QuizQuestion {
   question: string;
   answer: string;
 }
+
+declare var webkitSpeechRecognition: any;
+type SpeechRecognition = typeof webkitSpeechRecognition;
+
+const SILENCE_TIMEOUT_MS = 3000;
+const SIMILARITY_THRESHOLD = 0.95;
+const SPEECH_RATE = 0.5;
+const MAX_RETRIES = 10;
 
 @Component({
   selector: 'app-quizes',
@@ -24,44 +32,34 @@ interface QuizQuestion {
   styleUrl: './quizes.component.scss'
 })
 export class QuizesComponent {
-
-  private _questions: QuizQuestion[] = [];
+  // Public state
   public questions: QuizQuestion[] = [];
-
   public incorrectQuestions: QuizQuestion[] = [];
   public currentQuestion!: QuizQuestion;
-
   public userAnswer = '';
   public feedback = '';
   public listening = false;
   public isQuizActive = false;
   public quizCompleted = false;
-  public score: number = 0;
-  public metrics: any[] = []
-  // Quiz results
-  public correctAnswers: number = 0;
-  public incorrectAnswers: number = 0;
+  public score = 0;
+  public metrics: Metric[] = [];
+  public correctAnswers = 0;
+  public incorrectAnswers = 0;
 
+  // Private state
+  private _questions: QuizQuestion[] = [];
   private retryCount = 0;
-  private maxRetries = 10;
   private currentIndex = 0;
-  private recognition: any;
-
+  private recognition: SpeechRecognition | null = null;
+  private silenceTimeout: any;
+  private partialTranscript = '';
   private firestore = inject(Firestore);
   private cdr = inject(ChangeDetectorRef);
-  private numberMap: { [key: number]: string } = {
-    0: 'zero',
-    1: 'one',
-    2: 'two',
-    3: 'three',
-    4: 'four',
-    5: 'five',
-    6: 'six',
-    7: 'seven',
-    8: 'eight',
-    9: 'nine'
-  };
 
+  private numberMap: { [key: number]: string } = {
+    0: 'zero', 1: 'one', 2: 'two', 3: 'three', 4: 'four',
+    5: 'five', 6: 'six', 7: 'seven', 8: 'eight', 9: 'nine'
+  };
 
   public ngOnInit(): void {
     const questionsRef = collection(this.firestore, 'quiz-questions')
@@ -76,22 +74,17 @@ export class QuizesComponent {
       });
   }
 
-  public startQuiz(type: string = 'full') {
-    this.questions = type === 'retake' ? this.incorrectQuestions : this._questions;
+  public startQuiz(type: 'full' | 'retake' = 'full'): void {
+    this.questions = type === 'retake' ? [...this.incorrectQuestions] : [...this._questions];
     this.currentIndex = 0;
     this.resetQuizResults();
     this.isQuizActive = true;
     this.askQuestion();
   }
 
-  public cancelQuiz() {
-    if (this.recognition) {
-      this.recognition.abort();
-      this.recognition = null;
-    }
-  
+  public cancelQuiz(): void {
+    this.stopListening();
     speechSynthesis.cancel();
-  
     this.isQuizActive = false;
     this.quizCompleted = false;
     this.currentQuestion = undefined as any;
@@ -101,155 +94,171 @@ export class QuizesComponent {
     this.resetQuizResults();
   }
 
-
-  private askQuestion() {
+  private askQuestion(): void {
     this.currentQuestion = this.questions[this.currentIndex];
+    this.cdr.detectChanges();
     this.userAnswer = '';
     this.feedback = '';
-  
-    const utterance = new SpeechSynthesisUtterance(this.currentQuestion.question);
-    utterance.rate = 0.5;
-    utterance.onend = () => this.listen();
-  
+
+    const formatted = this.formatQuestion(this.currentQuestion.question);
+    const utterance = new SpeechSynthesisUtterance(formatted);
+    utterance.rate = SPEECH_RATE;
+    utterance.onend = () => this.startListening();
+
     speechSynthesis.speak(utterance);
   }
 
   private speak(text: string): Promise<void> {
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.onend = () => resolve();
       speechSynthesis.speak(utterance);
     });
   }
 
-  private listen() {
-    this.recognition = new (window as any).webkitSpeechRecognition();
+  private startListening(): void {
+    this.partialTranscript = '';
+    const SpeechRecognition = (window as any).webkitSpeechRecognition;
+    this.recognition = new SpeechRecognition();
     const recognition = this.recognition;
+    
     recognition.lang = 'en-US';
-    recognition.interimResults = false;
+    recognition.interimResults = true;
     recognition.maxAlternatives = 1;
     recognition.continuous = false;
-
-    this.listening = true;
-
-    recognition.onresult = async (event: any) => {
-      this.listening = false;
-      const transcript = event.results[0][0].transcript.trim();
-
-      if (!transcript) {
-        this.handleEmptySpeech();
-        return;
-      }
-
-      this.retryCount = 0;
-
-      this.userAnswer = this.convertDigitsToWords(transcript.toLowerCase());
-      const correctAnswer = this.currentQuestion.answer.toLowerCase().replace(/[:,().']/g, ''); // remove punctuation
-      
-      // Get the similarity percentage between the user answer and the correct answer
-      const similarityPercent = this.similarity(this.userAnswer, correctAnswer) * 100;
-      console.log('similarityPercent', similarityPercent)
-      console.log('userAnswer', this.userAnswer, correctAnswer)
-      if (similarityPercent >= 95) {
-        const additionalFeedback = similarityPercent < 100 ?  ` slightly difference based on what I heard. Answer: ${this.currentQuestion.answer}` : '';
-        this.feedback = 'Correct! ' + additionalFeedback;
-        this.correctAnswers++;
-      } else {
-        this.feedback = `Incorrect. The correct answer was: ${this.currentQuestion.answer}`;
-        this.incorrectAnswers++;
-        this.incorrectQuestions.push(this.currentQuestion);
-      }
     
-      // Proceed to the next question
-      await this.speak(this.feedback);
-      setTimeout(() => this.nextQuestion(), 3000);
-    };
-
-    recognition.onerror = (event: any) => {
-      console.log('on error', event)
-    };
-
-    recognition.onend = () => {
-      this.listening = false;
-      if (this.isQuizActive && !this.userAnswer) {
-        setTimeout(() => this.listen(), 500); // small delay to prevent infinite loops
+    this.listening = true;
+    recognition.onresult = (event: any) => {
+      let interimTranscript = '';
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        const transcript = event.results[i][0].transcript;
+        event.results[i].isFinal ? this.partialTranscript += transcript : interimTranscript += transcript;
       }
+      this.onSpeechRecognized();
+    };
+
+    recognition.onerror = () => this.stopListening();
+    recognition.onend = () => {
+      if (this.listening) this.startListening();
     };
 
     recognition.start();
   }
 
-
-  
-  private convertDigitsToWords(text: string): string {
-    return text.split('').map(char => {
-      const num = parseInt(char);
-      return !isNaN(num) ? this.numberMap[num] : char;  // Convert digits to words
-    }).join('');
+  private stopListening(): void {
+    if (this.recognition) {
+      this.listening = false;
+      this.recognition.abort();
+      this.recognition.stop();
+      this.recognition = null;
+    }
   }
 
-  private async handleEmptySpeech() {
-    if (this.retryCount < this.maxRetries) {
+  private async finalizeAnswer(): Promise<void> {
+    const finalTranscript = this.partialTranscript.trim().toLowerCase();
+    this.stopListening();
+
+    if (!finalTranscript) {
+      await this.handleEmptySpeech();
+      return;
+    }
+
+    this.retryCount = 0;
+    this.userAnswer = this.convertDigitsToWords(finalTranscript);
+    const correctAnswer = this.currentQuestion.answer.toLowerCase().replace(/[:,().']/g, '');
+
+    const similarityPercent = this.similarity(this.userAnswer, correctAnswer) * 100;
+    if (similarityPercent >= SIMILARITY_THRESHOLD * 100) {
+      const extra = similarityPercent < 100 ? ` Slightly different. Correct: ${this.currentQuestion.answer}` : '';
+      this.feedback = 'Correct!' + extra;
+      this.correctAnswers++;
+    } else {
+      this.feedback = `Incorrect. Correct answer: ${this.currentQuestion.answer}`;
+      this.incorrectAnswers++;
+      this.incorrectQuestions.push(this.currentQuestion);
+    }
+
+    await this.speak(this.feedback);
+    setTimeout(() => this.nextQuestion(), 2000);
+  }
+
+  private onSpeechRecognized(): void {
+    clearTimeout(this.silenceTimeout);
+    this.silenceTimeout = setTimeout(() => this.finalizeAnswer(), SILENCE_TIMEOUT_MS);
+  }
+
+  private async handleEmptySpeech(): Promise<void> {
+    if (this.retryCount < MAX_RETRIES) {
       this.retryCount++;
       this.feedback = "I didn't catch that. Let's try again.";
       await this.speak(this.feedback);
-      setTimeout(() => this.listen(), 500);
+      setTimeout(() => this.startListening(), 500);
     } else {
       this.retryCount = 0;
-      this.feedback = `Let's move on. The correct answer was: ${this.currentQuestion.answer}`;
+      this.feedback = `Moving on. Correct: ${this.currentQuestion.answer}`;
       await this.speak(this.feedback);
       setTimeout(() => this.nextQuestion(), 2000);
     }
   }
 
-
-  private async nextQuestion() {
-    console.log('next question')
+  private async nextQuestion(): Promise<void> {
     this.currentIndex++;
-    if (this.currentIndex < this.questions.length) {
-      this.askQuestion();
-    } else {
-      this.isQuizActive = false;
-      this.quizCompleted = true;
-      this.score = this.calculateScore();
-      this.metrics = this.calculateMetrics();
-      this.cdr.detectChanges();
-      await this.speak('Quiz completed! Your score is ' + this.score + ' percent.');
-      if (this.recognition) {
-        this.recognition.abort();
-        this.recognition = null;
-      }
-      this.currentQuestion = undefined as any;
-    }
+    if (this.currentIndex < this.questions.length) this.askQuestion();
+    else this.completeQuiz();
+  }
+
+  private async completeQuiz(): Promise<void> {
+    this.isQuizActive = false;
+    this.quizCompleted = true;
+    this.score = this.calculateScore();
+    this.metrics = this.calculateMetrics();
+    this.cdr.detectChanges();
+    await this.speak(`Quiz complete! Score: ${this.score} percent.`);
   }
 
   private calculateScore(): number {
-    const totalQuestions = this.correctAnswers + this.incorrectAnswers;
-    if (totalQuestions === 0) return 0;
-    return Math.round((this.correctAnswers / totalQuestions) * 100);
+    const total = this.correctAnswers + this.incorrectAnswers;
+    return total ? Math.round((this.correctAnswers / total) * 100) : 0;
   }
 
-  private calculateMetrics(): any[] {
-    const totalAnswer = this.correctAnswers + this.incorrectAnswers
+  private calculateMetrics(): Metric[] {
     return [
-      { label: 'Total', value: totalAnswer },
+      { label: 'Total', value: this.correctAnswers + this.incorrectAnswers },
       { label: 'Correct', value: this.correctAnswers },
-      { color: 'var(--mat-sys-on-error-container', label: 'Wrong', value: this.incorrectAnswers}
-    ]
+      { label: 'Wrong', value: this.incorrectAnswers, color: 'var(--mat-sys-on-error-container)' }
+    ];
   }
 
-  private resetQuizResults() {
+  private resetQuizResults(): void {
     this.correctAnswers = 0;
     this.incorrectAnswers = 0;
     this.incorrectQuestions = [];
   }
 
-
-  private similarity(userAnswer: string, correctAnswer: string): number {
-    const distance = levenshtein.get(userAnswer, correctAnswer);
-    const maxLength = Math.max(userAnswer.length, correctAnswer.length);
-    return 1 - distance / maxLength; // returns a percentage of similarity
+  private similarity(a: string, b: string): number {
+    const distance = levenshtein.get(a, b);
+    return 1 - distance / Math.max(a.length, b.length);
   }
- 
-  
+
+  private formatQuestion(q: string): string {
+    return (q ?? this.currentQuestion?.question ?? '').split(' ').map(section => {
+      const trimmed = section.trim();
+      if (!isNaN(Number(trimmed))) {
+        if (trimmed.includes('.')) {
+          const [before, after] = trimmed.split('.');
+          const spacedBefore = before.length > 2 ? before.split('').join(' ') : before;
+          return `${spacedBefore} .${after}`;
+        }
+        return trimmed.length === 3 ? `${trimmed[0]} ${trimmed.slice(1)}` : trimmed.split('').join(' ');
+      }
+      return trimmed;
+    }).join(' ');
+  }
+
+  private convertDigitsToWords(text: string): string {
+    return text.split('').map(char => {
+      const num = parseInt(char);
+      return !isNaN(num) ? this.numberMap[num] : char;
+    }).join('');
+  }
 }

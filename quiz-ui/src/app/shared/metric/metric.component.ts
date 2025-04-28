@@ -2,10 +2,10 @@ import { CommonModule } from '@angular/common';
 import { Component, Input } from '@angular/core';
 import { MatCardModule } from '@angular/material/card';
 
-interface Metric {
-  color: string
+export interface Metric {
   label: string
   value: number | string
+  color?: string
 }
 
 @Component({

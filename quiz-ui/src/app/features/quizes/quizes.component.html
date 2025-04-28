@@ -7,20 +7,29 @@
     <mat-card-subtitle></mat-card-subtitle>
   </mat-card-header>
   <mat-card-content>
-    <p>Answer the question by speaking.</p>
-    <p>Quiz settings: ...coming soon</p>
-    @if (currentQuestion){
-      <p>Question: {{ currentQuestion.question }}</p>
-      @if (userAnswer) {
-        <p>You said: {{ userAnswer }}</p>
-      }
-      @if (feedback) {
-        <p>Feedback: {{ feedback }}</p>
-      } 
+
+
+    @if (!isQuizActive) {
+      <p>Answer the question by speaking.</p>
+      <p>Quiz settings: ...coming soon</p>
+    }
+    @if (isQuizActive && currentQuestion){
+      <div class="question-container">
+        <h2 class="question-label">Question</h2>
+        <p class="question">{{ currentQuestion.question }}</p>
+        @if (userAnswer) {
+          <p>You said: {{ userAnswer }}</p>
+        }
+        @if (feedback) {
+          <p>Feedback: {{ feedback }}</p>
+        } 
+      </div>
     }
   </mat-card-content>
   <mat-card-actions>
-    <button mat-flat-button (click)="cancelQuiz()">Cancel</button>
+    @if (isQuizActive) {
+      <button mat-flat-button (click)="cancelQuiz()">Cancel</button>
+    }
     <button mat-button (click)="startQuiz()">Start</button>
   </mat-card-actions>
 </mat-card>
