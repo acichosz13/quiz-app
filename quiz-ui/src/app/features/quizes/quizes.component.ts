@@ -70,6 +70,12 @@ export class QuizesComponent {
     5: 'five', 6: 'six', 7: 'seven', 8: 'eight', 9: 'nine'
   };
 
+  private difficultyMap: { [key: string]: number } = {
+    'easy': 0,
+    'medium': 0.5,
+    'hard': 1
+  };
+
   public ngOnInit(): void {
     const questionsRef = collection(this.firestore, 'quiz-questions')
     collectionData(questionsRef, { idField: 'id' })
@@ -86,8 +92,11 @@ export class QuizesComponent {
 
   public startQuiz(type: 'full' | 'retake' = 'full'): void {
     const order = this.quizForm.get('questionOrder').value;
-    this.questions = type === 'retake' ? [...this.incorrectQuestions] : [...this._questions];
-    this.questions = order === 'asc' ? this.ascendingOrder(this.questions) : this.randomOrder(this.questions);
+    const difficulty = this.quizForm.get('difficulty').value;
+    const quizType = type === 'retake' ? [...this.incorrectQuestions] : [...this._questions];
+    const sorted = order === 'asc' ? this.ascendingOrder(quizType) : this.randomOrder(quizType);
+
+    this.questions = this.randomSwapQuestionsAndAnswers(sorted, this.difficultyMap[difficulty]);
 
     this.currentIndex = 0;
     this.resetQuizResults();
@@ -114,7 +123,7 @@ export class QuizesComponent {
     this.feedback = '';
 
     const formatted = this.formatQuestion(this.currentQuestion.question);
-    const utterance = new SpeechSynthesisUtterance(formatted);
+    const utterance = new SpeechSynthesisUtterance(this.convertDigitsToWords(formatted));
     utterance.rate = SPEECH_RATE;
     utterance.onend = () => this.startListening();
 
@@ -151,7 +160,9 @@ export class QuizesComponent {
 
     recognition.onerror = () => this.stopListening();
     recognition.onend = () => {
-      if (this.listening) this.startListening();
+      if (this.isQuizActive && !this.userAnswer && this.listening) {
+        setTimeout(() => this.startListening(), 500); // small delay to prevent infinite loops
+      }
     };
 
     recognition.start();
@@ -160,6 +171,8 @@ export class QuizesComponent {
   private stopListening(): void {
     if (this.recognition) {
       this.listening = false;
+      this.recognition.onend = null;
+      this.recognition.onerror = null;
       this.recognition.abort();
       this.recognition.stop();
       this.recognition = null;
@@ -176,7 +189,7 @@ export class QuizesComponent {
     }
 
     this.retryCount = 0;
-    this.userAnswer = this.convertDigitsToWords(finalTranscript);
+    this.userAnswer = finalTranscript;
     const similarityPercent = this.checkAnswer(this.currentQuestion.answer);
 
     if (similarityPercent >= SIMILARITY_THRESHOLD * 100) {
@@ -261,23 +274,32 @@ export class QuizesComponent {
           const spacedBefore = before.length > 2 ? before.split('').join(' ') : before;
           return `${spacedBefore} .${after}`;
         }
-        return trimmed.length === 3 ? `${trimmed[0]} ${trimmed.slice(1)}` : trimmed.split('').join(' ');
+        return trimmed.split('').join(' ');
       }
       return trimmed;
     }).join(' ');
   }
 
   private checkAnswer(answer: string): number {
-    const removedPunc = answer.toLowerCase().replace(/[:,().']/g, '');
+    const removedPunc = answer.toLowerCase().replace(/[:,()']/g, '');
 
     const removedPuncSim = this.similarity(this.userAnswer, removedPunc) * 100;
     if (removedPuncSim === 100) return removedPuncSim;
+
+    const convertDigits = this.convertDigitsToWords(removedPunc)
+    const convertDigitsSim = this.similarity(this.userAnswer, convertDigits) * 100;
+    if (convertDigitsSim === 100) return convertDigitsSim;
 
     const removedSlash = removedPunc.replace(/[/]/g, '').replace('  ', ' ');
     const removedSlashSim = this.similarity(this.userAnswer, removedSlash) * 100;
     if (removedSlashSim === 100) return removedSlashSim;
 
-    return Math.max(removedPuncSim, removedSlashSim);
+    const removeSpace = removedPunc.replace(/ +/g, '').trim();
+    const removeSpacAnswer = this.userAnswer.replace(/ +/g, '').trim();
+    const removedSpaceSim = this.similarity(removeSpacAnswer, removeSpace) * 100;
+    if (removedSpaceSim === 100) return removedSpaceSim;
+
+    return Math.max(removedPuncSim, removedSlashSim, removedSpaceSim);
   } 
 
   private convertDigitsToWords(text: string): string {
@@ -290,6 +312,7 @@ export class QuizesComponent {
   private buildForm(): void {
     this.quizForm = this.fb.group({
       questionOrder: ['asc'],
+      difficulty: ['easy'],
     })
   }
 
@@ -301,9 +324,35 @@ export class QuizesComponent {
     });
   }
 
-  private randomOrder(questions: QuizQuestion[]): QuizQuestion[] {
-    return questions
-      .map((question) => ({ ...question, sort: Math.random() }))
-      .sort((a, b) => a.sort - b.sort)
+  private randomOrder(arr: any[]): QuizQuestion[] {
+    for (let i = arr.length - 1; i >= 1; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
   }
+
+  public randomSwapQuestionsAndAnswers(
+    qaArray: QuizQuestion[],
+    swapFraction = 0.5 // 0.5 means swap about 50% of them
+  ): QuizQuestion[]{
+    const totalToSwap = Math.floor(qaArray.length * swapFraction);
+    const indexes = Array.from(qaArray.keys());
+    this.randomOrder(indexes);
+    const indexesToSwap = indexes.slice(0, totalToSwap);
+  
+    const newArray = qaArray.map((item, index) => {
+      if (indexesToSwap.includes(index)) {
+        return {
+          id: item.id,
+          question: item.answer,
+          answer: item.question,
+        };
+      }
+      return { ...item };
+    });
+  
+    return newArray;
+  }
+  
 }

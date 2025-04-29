@@ -18,6 +18,13 @@
           <mat-radio-button checked="true" value="asc">Ascending</mat-radio-button>
           <mat-radio-button value="random">Random</mat-radio-button>
         </mat-radio-group>
+
+        <label>Difficulty:</label>
+        <mat-radio-group aria-label="Difficulty" formControlName="difficulty">
+          <mat-radio-button checked="true" value="easy">Easy</mat-radio-button>
+          <mat-radio-button value="medium">Medium</mat-radio-button>
+          <mat-radio-button value="hard">Hard</mat-radio-button>
+        </mat-radio-group>
       </form>
     }
     @if (isQuizActive && currentQuestion){
