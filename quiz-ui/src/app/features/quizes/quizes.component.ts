@@ -7,6 +7,7 @@ import { collection, collectionData, Firestore } from '@angular/fire/firestore';
 import { MetricComponent, Metric } from '../../shared/metric/metric.component';
 import * as levenshtein from 'fast-levenshtein';
 import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
+import { WakeLockService } from '../../core/wake-lock/wake-lock.service';
 
 interface QuizQuestion {
   question: string;
@@ -64,6 +65,7 @@ export class QuizesComponent {
   private firestore = inject(Firestore);
   private cdr = inject(ChangeDetectorRef);
   private fb = inject(FormBuilder);
+  private wakeLockService = inject(WakeLockService);
 
   private numberMap: { [key: number]: string } = {
     0: 'zero', 1: 'one', 2: 'two', 3: 'three', 4: 'four',
@@ -88,6 +90,7 @@ export class QuizesComponent {
         });
       });
     this.buildForm();
+    this.wakeLockService.requestWakeLock();
   }
 
   public startQuiz(type: 'full' | 'retake' = 'full'): void {
